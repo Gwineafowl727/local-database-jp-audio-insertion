@@ -1,0 +1,18 @@
+{
+    "collection_media_path":"C:\\Users\\Windows Profile\\AppData\\Roaming\\Anki2\\User 1\\collection.media",
+    "user_files_path":"C:\\Users\\Windows Profile\\AppData\\Roaming\\Anki2\\addons21\\1045800357\\user_files",
+    "search_priority":[
+        "nhk16",
+        "shinmeikai8",
+        "strawberrybrown",
+        "poyotan",
+        "kaoring",
+        "akitomo",
+        "skent"
+    ],
+    "include_all_pitches":true,
+    "notetypes":{
+        "JP Mining Note":["Word", "WordAudio"],
+        "My Vocab":["Word", "Word Audio"]
+    }
+}
