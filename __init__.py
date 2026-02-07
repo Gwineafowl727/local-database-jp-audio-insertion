@@ -4,7 +4,7 @@ from aqt.qt import *
 from .Selector import Selector
 import json
 import os
-from .util import get_pitch_accent_notation, copy_to_collection_media
+from .util import get_kana, get_pitch_accent_notation, copy_to_collection_media, hira_to_kata, kata_to_hira
 
 
 """
@@ -18,7 +18,14 @@ to do:
 
 def get_forvo_audio(word: str, profile_name) -> str:
     """Return string name of the forvo audio file path, or empty string if doesn't exist"""
+
     file_name = f"{word}.opus"
+    file_path = os.path.join(parent_path, "forvo_files", profile_name, file_name)
+    if os.path.isfile(file_path):
+        return file_path
+    
+    raw_hira = kata_to_hira(word)
+    file_name = f"{raw_hira}.opus"
     file_path = os.path.join(parent_path, "forvo_files", profile_name, file_name)
     if os.path.isfile(file_path):
         return file_path
@@ -26,7 +33,7 @@ def get_forvo_audio(word: str, profile_name) -> str:
         return ""
     
 
-def get_nhk_audio(word: str) -> list:
+def get_nhk_audio(word: str, raw_kata: str, raw_hira: str) -> list:
     """Return list of 2 lists: \n
     list 1: string name of NHK audio file path \n
     list 2: string of pitch accent notation for audio file of same index in list 1 \n
@@ -35,7 +42,15 @@ def get_nhk_audio(word: str) -> list:
     try:
         index = nhk_map[word]
     except KeyError:
-        return []
+        try:  # For onomatopoeia words, for instance, may be documented in hira instead of kata
+            if raw_hira:
+                index = nhk_map[raw_hira]
+            else:
+                return []
+            
+        except KeyError:
+            print(f"key error for {word}, also key error for {raw_hira}")
+            return []
     entry = nhk_dict[index]
     accents_list = entry["accents"]
 
@@ -44,9 +59,13 @@ def get_nhk_audio(word: str) -> list:
 
     for a in accents_list:
 
+        accent = a["accent"][0]
+        word_pronunciation = accent["pronunciation"]
+        if raw_kata and word_pronunciation != raw_kata:
+            print(f"{word} DOES NOT MATCH {raw_kata} in get_nhk_audio()")
+            continue
 
         audios_list.append(os.path.join(nhk_audio_folder, a["soundFile"]))
-        accent = a["accent"][0]
         pitch_list.append(get_pitch_accent_notation(accent["pronunciation"], accent["pitchAccent"]))
     return [audios_list, pitch_list]
 
@@ -76,7 +95,7 @@ def get_shinmeikai_audio(word: str) -> list:
 
 def load_dicts() -> None:
     """
-    Loads the dictionaries as global variables only once user tries to do something with addon,\n
+    Loads the dictionaries as global variables only once user tries to do something with addon,
     as our other choice is to lag Anki for a second every time it opens.
     """
     global nhk_dict
@@ -143,12 +162,32 @@ def auto_select(note) -> None:
             index = i
     word = note.fields[index]
 
+    # Seeing if user config for this notetype has a furigana/reading field
+    # then using it if it does
+    try:
+        furigana_field_name = user_config["notetypes"][note_type_name][2]
+        for i, field_name in enumerate(field_name_list):
+            if field_name == furigana_field_name:
+                index = i
+        furigana_string = note.fields[index]
+        raw_kana = get_kana(furigana_string)
+        raw_kata = hira_to_kata(raw_kana)
+        if raw_kana == raw_kata:
+            raw_hira = kata_to_hira(raw_kata)  # Basically for onomatopoeia written in katakana
+        else:
+            raw_hira = False
+    except:
+        raw_hira = False
+        raw_kata = False
+
+
     search_priority_list = user_config["search_priority"]
+    print(search_priority_list)
     for source in search_priority_list:
 
         if source == "nhk16":
-            nhk_list = get_nhk_audio(word)
-            if not nhk_list:
+            nhk_list = get_nhk_audio(word, raw_kata, raw_hira)
+            if not nhk_list or nhk_list == [[], []]:
                 pass
             else:
                 add_to_card = []
@@ -161,15 +200,18 @@ def auto_select(note) -> None:
                     
 
         elif source == "shinmeikai8":
+            print("source is shinmeikai")
             shinmeikai_list = get_shinmeikai_audio(word)
-            if not shinmeikai_list:
+            if not shinmeikai_list or shinmeikai_list == [[], []]:
                 pass
             else:
+                print("making add_to_card")
                 add_to_card = []
                 for i, file_path in enumerate(shinmeikai_list[0]):
                     add_to_card.append(copy_to_collection_media(file_path, user_config["collection_media_path"])[0])
                     if not user_config["include_all_pitches"]:
                         break
+                print("filling in with shinmeikai audio")
                 fill_audio_field(add_to_card, field_name_list, note)
                 return
 
@@ -210,6 +252,25 @@ def manual_select(editor) -> None:
             index = i
     word = editor_note.fields[index]
 
+    # Seeing if user config for this notetype has a furigana/reading field
+    # then using it if it does
+    try:
+        furigana_field_name = user_config["notetypes"][editor_note_type_name][2]
+        for i, field_name in enumerate(field_name_list):
+            if field_name == furigana_field_name:
+                index = i
+        furigana_string = editor_note.fields[index]
+        raw_kana = get_kana(furigana_string)
+        raw_kata = hira_to_kata(raw_kana)
+        if raw_kana == raw_kata:
+            raw_hira = kata_to_hira(raw_kata)  # Basically for onomatopoeia written in katakana
+        else:
+            raw_hira = False
+    except:
+        raw_hira = False
+        raw_kata = False
+
+
     strawberry_brown = get_forvo_audio(word, "strawberrybrown")
     poyotan = get_forvo_audio(word, "poyotan")
     kaoring = get_forvo_audio(word, "kaoring")
@@ -221,8 +282,14 @@ def manual_select(editor) -> None:
     audio_list = [strawberry_brown, poyotan, kaoring, akimoto, skent]
     text_list = ["strawberry_brown", "poyotan", "kaoring", "akimoto", "skent"]
 
+    nhk_list = get_nhk_audio(word, raw_kata, raw_hira)
+    print(nhk_list)
+    print("ABOVE THIS IS NHK LIST")
+
+    shinmeikai_list = get_shinmeikai_audio(word)
+    
     try:
-        nhk_list = get_nhk_audio(word)
+        
         nhk_audios = nhk_list[0]
         nhk_pitches = nhk_list[1]
     except:
@@ -230,7 +297,6 @@ def manual_select(editor) -> None:
         nhk_audios = []
         nhk_pitches = []
     try:
-        shinmeikai_list = get_shinmeikai_audio(word)
         shinmeikai_audios = shinmeikai_list[0]
         shinmeikai_pitches = shinmeikai_list[1]
     except:
@@ -254,7 +320,6 @@ def manual_select(editor) -> None:
     for file_path, name in zip(audio_list, text_list):
         if file_path == "":
             continue
-        print(file_path)
         audio_tuple = copy_to_collection_media(file_path, user_config["collection_media_path"])
         all_audio_strings.append(audio_tuple[0])
         collection_audio_file_path.append(audio_tuple[1])
